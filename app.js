@@ -1,63 +1,69 @@
 const request = require('request');
 require("dotenv").config();
 
+var { MailListener } = require("mail-listener6");   // NOTE: A FUTURE VERSION (release date TBA) will not require ES6 destructuring or referring to the class after the require statement (i.e. require('mail-listener6').MailListener). At this stage, this is necessary because index.js exports the MailListener class as a property of module.exports.
 
-createEvent("test", "Testtermin", "20211106T120000Z", "20211106T123000Z")
-setTimeout(() => {
-  deleteEvent("test")
-}, 5000)
+var mailListener = new MailListener({
+  username: process.env.EMAIL_USER,
+  password: process.env.EMAIL_PASSWORD,
+  host: process.env.EMAIL_HOST,
+  port: process.env.EMAIL_PORT, // imap port
+  tls: true,
+  connTimeout: 10000, // Default by node-imap
+  authTimeout: 5000, // Default by node-imap,
+  debug: console.log, // Or your custom function with only one incoming argument. Default: null
+  tlsOptions: { rejectUnauthorized: false },
+  mailbox: "INBOX", // mailbox to monitor
+  searchFilter: ["UNSEEN"], // the search filter being used after an IDLE notification has been retrieved
+  markSeen: true, // all fetched email willbe marked as seen and not fetched next time
+  fetchUnreadOnStart: true, // use it only if you want to get all unread email on lib start. Default is `false`,
+  attachments: false, // download attachments as they are encountered to the project directory
+  //attachmentOptions: { directory: "attachments/" } // specify a download directory for attachments
+});
 
+mailListener.start(); // start listening
 
-function createEvent(id, title, start, end, location, description) {
-  if (!id || !title || !start || !end) return false
-git
-  location = location || ""
-  description = description || ""
+mailListener.on("attachment", function(attachment, path, seqno) {
+  if (attachment.contentType == "text/calendar") {
+    let content = attachment.content.toString('ascii')
+    const uid = encodeURIComponent(content.replaceAll("\r", "").split("UID:")[1].split("\n")[0])
 
-  const timestamp = new Date().toISOString().replaceAll("-", "").replaceAll(":", "").substr(0, 15) + "Z"
-  request(
-    {
-      method: "PUT",
-      url : process.env.CALDAV_ADDRESS + id + ".ics",
-      auth: {
-        user: process.env.CALDAV_USER,
-        password: process.env.CALDAV_PASSWORD
-      },
-      headers : {
-          "Content-Type": "text/calendar; charset=utf-8"
-      },
-      body: "BEGIN:VCALENDAR\n" +
-            "VERSION:2.0\n" +
-            "PRODID:GreenpeaceCalendarAutomizer\n" +
-            "BEGIN:VEVENT\n" +
-            "UID:" + id + "\n" +
-            "LOCATION:" + location + "\n" +
-            "SUMMARY:" + title + "\n" +
-            "DESCRIPTION:" + description + "\n" +
-            "DTSTAMP:" + timestamp + "\n" +
-            "DTSTART:" + start + "\n" +
-            "DTEND:" + end + "\n" +
-            "END:VEVENT\n" +
-            "END:VCALENDAR"
-    },
-    function (error, response, body) {
-      console.log(body)
+    if (content.indexOf("METHOD:CANCEL") < 0) {
+      content = content.replace("METHOD:REQUEST", "METHOD:PUBLISH")
+      content = content.replaceAll("PARTSTAT=NEEDS-ACTION", "PARTSTAT=ACCEPTED")
+      console.log(content)
+      request(
+        {
+          method: "PUT",
+          url : process.env.CALDAV_ADDRESS + uid + ".ics",
+          auth: {
+            user: process.env.CALDAV_USER,
+            password: process.env.CALDAV_PASSWORD
+          },
+          headers : {
+              "Content-Type": "text/calendar; charset=utf-8"
+          },
+          body: content
+        },
+        function (error, response, body) {
+          console.log(body)
+        }
+      )
+    } else {
+      console.log(content)
+      request(
+        {
+          method: "DELETE",
+          url : process.env.CALDAV_ADDRESS + uid + ".ics",
+          auth: {
+            user: process.env.CALDAV_USER,
+            password: process.env.CALDAV_PASSWORD
+          }
+        },
+        function (error, response, body) {
+          console.log(body)
+        }
+      )
     }
-  )
-}
-
-function deleteEvent(id) {
-  request(
-    {
-      method: "DELETE",
-      url : process.env.CALDAV_ADDRESS + id + ".ics",
-      auth: {
-        user: process.env.CALDAV_USER,
-        password: process.env.CALDAV_PASSWORD
-      }
-    },
-    function (error, response, body) {
-      console.log(body)
-    }
-  )
-}
+  }
+})
